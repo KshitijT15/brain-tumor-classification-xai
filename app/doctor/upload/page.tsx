@@ -1,35 +1,62 @@
 'use client'
-import { useEffect, useState } from 'react'
+// app/doctor/upload/page.tsx
+
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth'
 import { createDoctorScan, updateScanPrediction, updateScanGradcam,
-         updateScanShap, updateScanLime, updateScanError, updateDoctorNotes } from '@/lib/scans'
+         updateScanShap, updateScanLime, updateScanError, updateDoctorNotes,
+         updateScanStatus, cancelStaleScans } from '@/lib/scans'
 
 const HF_URL = process.env.NEXT_PUBLIC_HF_SPACE_URL
 
+// Global abort controller — one per browser session, shared across mounts
+let globalAbortController: AbortController | null = null
+
 export default function DoctorUploadPage() {
   const router = useRouter()
-  const [user, setUser]             = useState<any>(null)
+  const [user, setUser]               = useState<any>(null)
   const [patientName, setPatientName] = useState('')
-  const [file, setFile]             = useState<File | null>(null)
-  const [preview, setPreview]       = useState<string | null>(null)
-  const [status, setStatus]         = useState('')
-  const [prediction, setPrediction] = useState<any>(null)
-  const [gradcam, setGradcam]       = useState<string | null>(null)
-  const [shap, setShap]             = useState<string | null>(null)
-  const [lime, setLime]             = useState<string | null>(null)
-  const [running, setRunning]       = useState(false)
-  const [scanId, setScanId]         = useState<string | null>(null)
-  const [notes, setNotes]           = useState('')
-  const [notesSaved, setNotesSaved] = useState(false)
-  const [savingNotes, setSavingNotes] = useState(false)
+  const [file, setFile]               = useState<File | null>(null)
+  const [preview, setPreview]         = useState<string | null>(null)
+  const [status, setStatus]           = useState('')
+  const [prediction, setPrediction]   = useState<any>(null)
+  const [gradcam, setGradcam]         = useState<string | null>(null)
+  const [shap, setShap]               = useState<string | null>(null)
+  const [lime, setLime]               = useState<string | null>(null)
+  const [running, setRunning]         = useState(false)
+  const [scanId, setScanId]           = useState<string | null>(null)
+  const [notes, setNotes]             = useState('')
+  const [notesSaved, setNotesSaved]   = useState(false)
+  const [savingNotes, setSavingNotes]         = useState(false)
+  const [completedScanId, setCompletedScanId] = useState<string | null>(null)
+
+  const scanIdRef  = useRef<string | null>(null)
+  const runningRef = useRef(false)
 
   useEffect(() => {
     getCurrentUser().then(u => {
       if (!u || u.profile?.role !== 'doctor') { router.push('/'); return }
       setUser(u)
+      cancelStaleScans(u.id).catch(() => {})
     })
-  }, [])
+    return () => { abortIfRunning('Component unmounted') }
+  }, [router])
+
+  function abortIfRunning(reason = 'Aborted') {
+    if (globalAbortController && runningRef.current) {
+      globalAbortController.abort()
+      globalAbortController = null
+      if (scanIdRef.current) {
+        updateScanStatus(scanIdRef.current, 'error', `Analysis terminated: ${reason}`)
+          .catch(() => {})
+      }
+      runningRef.current = false
+      setRunning(false)
+      setStatus('')
+    }
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -42,60 +69,97 @@ export default function DoctorUploadPage() {
 
   async function handleSubmit() {
     if (!file || !patientName.trim() || !user) return
+
+    abortIfRunning('New analysis started')
+
+    globalAbortController = new AbortController()
+    const signal = globalAbortController.signal
+
     setRunning(true)
+    runningRef.current = true
     setPrediction(null); setGradcam(null); setShap(null); setLime(null)
     setNotes(''); setNotesSaved(false)
 
     const scan = await createDoctorScan(user.id, patientName.trim())
     setScanId(scan.id)
+    scanIdRef.current = scan.id
 
     const formData = new FormData()
     formData.append('file', file)
 
-    const res = await fetch(`${HF_URL}/predict`, { method: 'POST', body: formData })
-    const reader = res.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+    try {
+      const res = await fetch(`${HF_URL}/predict`, {
+        method: 'POST',
+        body: formData,
+        signal,
+      })
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const chunks = buffer.split('\n\n')
-      buffer = chunks.pop() ?? ''
+      // ── Guard: HF Space cold-start or error can return no body ──
+      if (!res.body) {
+        throw new Error(
+          `No response stream from model server (HTTP ${res.status}). ` +
+          `The HuggingFace Space may be cold-starting — wait 30s and try again.`
+        )
+      }
 
-      for (const chunk of chunks) {
-        const eventMatch = chunk.match(/^event: (\w+)/m)
-        const dataMatch  = chunk.match(/^data: (.+)/m)
-        if (!eventMatch || !dataMatch) continue
-        const event = eventMatch[1]
-        const data  = JSON.parse(dataMatch[1])
+      const reader  = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
 
-        if (event === 'status')     { setStatus(data.message) }
-        if (event === 'prediction') {
-          setPrediction(data)
-          await updateScanPrediction(scan.id, data.prediction, data.confidence, data.probabilities)
-        }
-        if (event === 'gradcam') {
-          setGradcam(data.image_b64)
-          await updateScanGradcam(scan.id, data.image_b64)
-        }
-        if (event === 'shap') {
-          setShap(data.image_b64)
-          await updateScanShap(scan.id, data.image_b64)
-        }
-        if (event === 'lime') {
-          setLime(data.image_b64)
-          await updateScanLime(scan.id, data.image_b64)
-          setStatus('All analyses complete.')
-        }
-        if (event === 'error') {
-          setStatus(`Error: ${data.message}`)
-          await updateScanError(scan.id, data.message)
+      while (true) {
+        if (signal.aborted) break
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const chunks = buffer.split('\n\n')
+        buffer = chunks.pop() ?? ''
+
+        for (const chunk of chunks) {
+          if (signal.aborted) break
+          const eventMatch = chunk.match(/^event: (\w+)/m)
+          const dataMatch  = chunk.match(/^data: (.+)/m)
+          if (!eventMatch || !dataMatch) continue
+          const event = eventMatch[1]
+          const data  = JSON.parse(dataMatch[1])
+
+          if (event === 'status')     { setStatus(data.message) }
+          if (event === 'prediction') {
+            setPrediction(data)
+            await updateScanPrediction(scan.id, data.prediction, data.confidence, data.probabilities)
+          }
+          if (event === 'gradcam') {
+            setGradcam(data.image_b64)
+            await updateScanGradcam(scan.id, data.image_b64)
+          }
+          if (event === 'shap') {
+            setShap(data.image_b64)
+            await updateScanShap(scan.id, data.image_b64)
+          }
+          if (event === 'lime') {
+            setLime(data.image_b64)
+            await updateScanLime(scan.id, data.image_b64)
+            setStatus('All analyses complete.')
+            setCompletedScanId(scan.id)
+          }
+          if (event === 'error') {
+            setStatus(`Error: ${data.message}`)
+            await updateScanError(scan.id, data.message)
+          }
         }
       }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        // Silently swallow — cleaned up in abortIfRunning()
+      } else {
+        setStatus(`Error: ${err.message}`)
+        if (scanIdRef.current) {
+          await updateScanError(scanIdRef.current, err.message).catch(() => {})
+        }
+      }
+    } finally {
+      runningRef.current = false
+      setRunning(false)
     }
-    setRunning(false)
   }
 
   async function handleSaveNotes() {
@@ -104,6 +168,12 @@ export default function DoctorUploadPage() {
     await updateDoctorNotes(scanId, notes)
     setSavingNotes(false)
     setNotesSaved(true)
+  }
+
+  async function handleSignOut() {
+    abortIfRunning('User signed out')
+    await import('@/lib/auth').then(m => m.signOut())
+    router.push('/')
   }
 
   const COLORS: Record<string, string> = {
@@ -120,12 +190,12 @@ export default function DoctorUploadPage() {
           {user && <p className="text-sm text-gray-400 mt-1">Dr. {user.profile?.name}</p>}
         </div>
         <div className="flex gap-3">
-          <button onClick={() => router.push('/doctor/cases')}
+          <button onClick={() => { abortIfRunning('Navigated away'); router.push('/doctor/cases') }}
             className="text-sm border border-gray-700 hover:border-gray-500
               text-gray-400 hover:text-white px-4 py-2 rounded-lg transition-colors">
             My Cases
           </button>
-          <button onClick={() => { import('@/lib/auth').then(m => m.signOut()); router.push('/') }}
+          <button onClick={handleSignOut}
             className="text-sm text-gray-400 hover:text-red-400 transition-colors">
             Sign Out
           </button>
@@ -136,7 +206,6 @@ export default function DoctorUploadPage() {
         {/* Left — form */}
         <div className="space-y-4">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
-            {/* Patient name */}
             <div>
               <label className="block text-sm text-gray-400 mb-2">Patient Name</label>
               <input
@@ -148,7 +217,6 @@ export default function DoctorUploadPage() {
               />
             </div>
 
-            {/* File upload */}
             <div>
               <label className="block text-sm text-gray-400 mb-2">MRI Image (jpg/png)</label>
               <label className="block w-full cursor-pointer border-2 border-dashed
@@ -168,6 +236,14 @@ export default function DoctorUploadPage() {
               {running ? 'Analysing...' : 'Run Analysis'}
             </button>
 
+            {running && (
+              <button onClick={() => abortIfRunning('Cancelled by user')}
+                className="w-full border border-red-700 text-red-400 hover:bg-red-900/20
+                  font-semibold py-2 rounded-lg transition-colors text-sm">
+                Cancel Analysis
+              </button>
+            )}
+
             {status && (
               <div className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3
                 text-sm text-yellow-300">
@@ -177,7 +253,6 @@ export default function DoctorUploadPage() {
             )}
           </div>
 
-          {/* Notes — shown after prediction */}
           {prediction && (
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
               <label className="block text-sm text-gray-400 mb-2">
@@ -247,6 +322,27 @@ export default function DoctorUploadPage() {
                 className="w-full rounded-lg" />
             </div>
           ))}
+
+          {/* ── CTA: View full case report once analysis is done ── */}
+          {completedScanId && (
+            <Link
+              href={`/doctor/cases/${completedScanId}`}
+              className="flex items-center justify-between w-full
+                bg-teal-600/10 hover:bg-teal-600/20
+                border border-teal-500/30 hover:border-teal-500/60
+                rounded-2xl px-5 py-4 transition-all group"
+            >
+              <div>
+                <p className="text-sm font-semibold text-teal-300">
+                  📋 View Full Case Report
+                </p>
+                <p className="text-xs text-teal-400/60 mt-0.5">
+                  See Grad-CAM · SHAP · LIME · AI explanation · add clinical notes
+                </p>
+              </div>
+              <span className="text-teal-400 text-lg group-hover:translate-x-1 transition-transform">→</span>
+            </Link>
+          )}
         </div>
       </div>
     </div>

@@ -1,94 +1,116 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getCurrentUser } from '@/lib/auth'
+import Link from 'next/link'
+import { getCurrentUser, signOut } from '@/lib/auth'
 import { getDoctorScans } from '@/lib/scans'
+
+const CLASS_BADGE: Record<string, string> = {
+  glioma:     'text-red-400',
+  meningioma: 'text-orange-400',
+  no_tumor:   'text-green-400',
+  pituitary:  'text-blue-400',
+}
+const CLASS_LABEL: Record<string, string> = {
+  glioma: 'Glioma', meningioma: 'Meningioma', no_tumor: 'No Tumour', pituitary: 'Pituitary',
+}
 
 export default function DoctorCasesPage() {
   const router = useRouter()
-  const [user, setUser]       = useState<any>(null)
-  const [scans, setScans]     = useState<any[]>([])
+  const [scans,   setScans]   = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [search,  setSearch]  = useState('')
+  const [filter,  setFilter]  = useState('all')
 
   useEffect(() => {
-    getCurrentUser().then(async u => {
+    getCurrentUser().then(u => {
       if (!u || u.profile?.role !== 'doctor') { router.push('/'); return }
-      setUser(u)
-      const data = await getDoctorScans(u.id)
-      setScans(data ?? [])
-      setLoading(false)
+      getDoctorScans(u.id).then(s => { setScans(s ?? []); setLoading(false) })
     })
-  }, [])
+  }, [router])
 
-  const STATUS_COLOR: Record<string, string> = {
-    done: 'text-green-400', processing: 'text-yellow-400',
-    error: 'text-red-400',  pending: 'text-gray-400'
-  }
+  // Only show done scans — hide processing/error clutter
+  const filtered = scans
+    .filter(s => s.status === 'done')
+    .filter(s => filter === 'all' || s.prediction === filter)
+    .filter(s => (s.patient_name ?? '').toLowerCase().includes(search.toLowerCase()))
 
   return (
-    <div className="min-h-screen p-6 max-w-4xl mx-auto">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">📋 My Cases</h1>
-          {user && <p className="text-sm text-gray-400 mt-1">Dr. {user.profile?.name}</p>}
+    <div className="min-h-screen bg-gray-950 text-white">
+      <nav className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-teal-400">Brain Tumour XAI</span>
+          <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">Doctor</span>
         </div>
-        <div className="flex gap-3">
-          <button onClick={() => router.push('/doctor/upload')}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm
-              font-medium px-4 py-2 rounded-lg transition-colors">
-            + New Scan
-          </button>
-          <button onClick={() => { import('@/lib/auth').then(m => m.signOut()); router.push('/') }}
-            className="text-sm text-gray-400 hover:text-red-400 transition-colors">
-            Sign Out
-          </button>
+        <div className="flex items-center gap-4">
+          <Link href="/doctor/upload" className="text-sm text-gray-400 hover:text-white">+ New Analysis</Link>
+          <button onClick={() => { signOut(); router.push('/') }} className="text-sm text-gray-500 hover:text-white">Sign out</button>
         </div>
-      </div>
+      </nav>
 
-      {loading ? <p className="text-gray-400">Loading...</p>
-      : scans.length === 0
-        ? (
-          <div className="text-center py-20">
-            <p className="text-gray-400 mb-4">No cases yet.</p>
-            <button onClick={() => router.push('/doctor/upload')}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg">
-              Run your first analysis
-            </button>
+      <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-semibold">All Cases</h2>
+            <p className="text-sm text-gray-400 mt-0.5">{filtered.length} completed scans</p>
           </div>
+          <Link href="/doctor/upload" className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-sm rounded-lg transition-colors">
+            + New Scan
+          </Link>
+        </div>
+
+        {/* Filter bar */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input type="text" placeholder="Search patient…" value={search} onChange={e => setSearch(e.target.value)}
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3.5 py-2 text-sm text-white
+                       placeholder-gray-500 focus:outline-none focus:border-teal-500" />
+          <div className="flex gap-2 flex-wrap">
+            {['all', 'glioma', 'meningioma', 'no_tumor', 'pituitary'].map(c => (
+              <button key={c} onClick={() => setFilter(c)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  filter === c ? 'bg-gray-700 border-gray-500 text-white' : 'border-gray-700 text-gray-400 hover:border-gray-600'
+                }`}>
+                {CLASS_LABEL[c] ?? 'All'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-center py-16 text-gray-600">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16 text-gray-600">No completed scans yet.</div>
         ) : (
           <div className="space-y-3">
-            {scans.map(scan => (
-              <div key={scan.id}
-                onClick={() => router.push(`/doctor/case/${scan.id}`)}
-                className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-4
-                  cursor-pointer hover:border-blue-500 transition-colors">
-                <div className="flex justify-between items-center">
+            {filtered.map(scan => (
+              <Link key={scan.id} href={`/doctor/cases/${scan.id}`}
+                className="flex items-center justify-between p-4 rounded-xl border border-gray-800
+                           bg-gray-900 hover:border-gray-700 transition-colors group">
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-gray-800 flex items-center justify-center text-lg">🧠</div>
                   <div>
-                    <p className="font-semibold">
-                      {scan.patient_name ?? 'Unnamed patient'}
+                    <p className="text-sm font-medium">{scan.patient_name ?? 'Unnamed'}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {new Date(scan.created_at).toLocaleString('en-IN', {
+                        day: '2-digit', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                      })}
                     </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {new Date(scan.created_at).toLocaleString()}
-                    </p>
-                    {scan.doctor_notes && (
-                      <p className="text-xs text-green-400 mt-1">✓ Notes saved</p>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <p className={`font-semibold capitalize ${STATUS_COLOR[scan.status]}`}>
-                      {scan.prediction?.replace('_', ' ') ?? scan.status}
-                    </p>
-                    {scan.confidence && (
-                      <p className="text-sm text-gray-400">
-                        {(scan.confidence * 100).toFixed(1)}%
-                      </p>
-                    )}
                   </div>
                 </div>
-              </div>
+                <div className="text-right">
+                  <p className={`text-sm font-medium ${CLASS_BADGE[scan.prediction ?? ''] ?? 'text-gray-400'}`}>
+                    {CLASS_LABEL[scan.prediction ?? ''] ?? scan.prediction ?? '—'}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {scan.confidence != null ? `${(scan.confidence * 100).toFixed(1)}%` : ''}
+                  </p>
+                </div>
+              </Link>
             ))}
           </div>
         )}
+      </div>
     </div>
   )
 }
