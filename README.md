@@ -168,21 +168,6 @@ npm run dev
 # Opens at http://localhost:3000
 ```
 
-### Environment Variables
-
-Create `.env.local`:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-NEXT_PUBLIC_HF_SPACE_URL=https://kshitijt15-brain-tumor-xai.hf.space
-NEXT_PUBLIC_GROQ_API_KEY=gsk_...
-```
-
-> ⚠️ Never commit `.env.local` — it is already in `.gitignore`.
-
----
-
 ## 🗄️ Database Schema
 
 Run `supabase_schema.sql` in Supabase → SQL Editor:
