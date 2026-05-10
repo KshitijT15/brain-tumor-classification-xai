@@ -19,12 +19,35 @@ This project classifies brain MRI scans into four categories — **Glioma**, **M
 
 ---
 
+## 📸 Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>Login / Sign Up</b></td>
+    <td align="center"><b>Doctor Upload</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/login.png" width="480"/></td>
+    <td><img src="docs/doctor-upload.png" width="480"/></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Analysis Result + Grad-CAM</b></td>
+    <td align="center"><b>Case Detail — Grad-CAM · SHAP · LIME + AI Explanation</b></td>
+  </tr>
+  <tr>
+    <td><img src="docs/doctor-result.png" width="480"/></td>
+    <td><img src="docs/case-detail.png" width="480"/></td>
+  </tr>
+</table>
+
+---
+
 ## 🗂️ Project Components
 
 | Component | Link |
 |---|---|
 | 🖥️ **Frontend** (this repo) | Next.js 14 · TypeScript · Tailwind · Supabase |
-| 🤖 **ML Backend** | HuggingFace Spaces (FastAPI + ZeroGPU) |
+| 🤖 **ML Backend** | HuggingFace Spaces (FastAPI + CPU Docker) |
 | 🏋️ **Model Weights** (171 MB) | HuggingFace Model Hub |
 | 📦 **Dataset** | [Augmented FigShare on Kaggle](https://www.kaggle.com/datasets/userisakid/augmented-figshare-dataset) |
 | 📓 **ResNet101 Training Notebook** | [Kaggle](https://www.kaggle.com/code/userisakid/resnet101-v1) |
@@ -33,6 +56,8 @@ This project classifies brain MRI scans into four categories — **Glioma**, **M
 ---
 
 ## 🏗️ Architecture
+
+![Architecture](docs/architecture.svg)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -49,7 +74,7 @@ This project classifies brain MRI scans into four categories — **Glioma**, **M
 └──────────────┬──────────────────────────┬───────────────────┘
                │                          │
 ┌──────────────▼──────────────┐  ┌────────▼───────────────────┐
-│  SUPABASE (Auth + Database) │  │  HF SPACES — ZeroGPU A100  │
+│  SUPABASE (Auth + Database) │  │  HF SPACES — CPU Docker    │
 │  - Auth with role metadata  │  │  FastAPI + ResNet101       │
 │  - profiles table (role)    │  │  /predict  → Grad-CAM      │
 │  - scans table (results +   │  │  /shap     → SHAP          │
@@ -88,13 +113,13 @@ This project classifies brain MRI scans into four categories — **Glioma**, **M
 
 ## 🔍 XAI Techniques
 
-All three techniques run server-side on ZeroGPU (free A100) and return images stored in Supabase Storage.
+All three techniques run server-side on CPU Docker and return images stored as PNGs in Supabase Storage.
 
-| Technique | Method | Typical Latency | What it shows |
+| Technique | Method | Typical Latency (CPU) | What it shows |
 |---|---|---|---|
-| **Grad-CAM** | Gradient × activation in `layer4[-1].conv3` | ~100ms | Which spatial regions the model focused on |
-| **SHAP** | GradientExplainer with 40-image background set | ~3–4s | Pixel-level feature attribution (red = supports, blue = opposes) |
-| **LIME** | 600 perturbation samples, quickshift segmentation | ~8–12s | Superpixel regions that most supported the decision |
+| **Grad-CAM** | Gradient × activation in `layer4[-1].conv3` | ~3–5s | Which spatial regions the model focused on |
+| **SHAP** | GradientExplainer with 16-image background set | ~30–40s | Pixel-level feature attribution (red = supports, blue = opposes) |
+| **LIME** | 300 perturbation samples, quickshift segmentation | ~35–40s | Superpixel regions that most supported the decision |
 
 ---
 
@@ -103,10 +128,8 @@ All three techniques run server-side on ZeroGPU (free A100) and return images st
 ### Features
 - 🔐 Email/password authentication with role-based access (Doctor / Patient)
 - 🩺 **Doctor dashboard:** upload MRI, enter patient name, watch XAI results stream in progressively, write clinical notes
-- 👤 **Patient dashboard:** self-upload, view own scan history, XAI results, doctor notes, and AI explanation
-- 🤖 **AI explanation:** plain-language summary of every scan result powered by Groq API (Llama 3.3 70B — free)
+- 👤 **Patient dashboard:** self-upload, view own scan history, XAI results, and doctor notes
 - 📸 XAI images stored as PNGs in Supabase Storage (not base64 in DB)
-- 🔄 Concurrency-safe: abort controller prevents duplicate submissions; stale scans auto-cleaned on page load
 - 📱 Responsive — works on mobile and desktop
 
 ### Pages
@@ -118,7 +141,7 @@ All three techniques run server-side on ZeroGPU (free A100) and return images st
 /doctor/cases/[id]          Case detail: XAI images + doctor notes editor
 /patient/upload             Patient self-upload
 /patient/scans              Patient's scan history
-/patient/result/[id]        Result detail: XAI + AI explanation + doctor notes
+/patient/result/[id]        Result detail: XAI + doctor notes
 ```
 
 ---
@@ -129,12 +152,11 @@ All three techniques run server-side on ZeroGPU (free A100) and return images st
 |---|---|
 | **Frontend** | Next.js 14, TypeScript, Tailwind CSS |
 | **Auth + Database** | Supabase (Auth, PostgreSQL, Storage) |
-| **ML Backend** | FastAPI, PyTorch, HuggingFace Spaces ZeroGPU |
+| **ML Backend** | FastAPI, PyTorch, HuggingFace Spaces (CPU Docker) |
 | **Model** | ResNet101 (fine-tuned), torchvision |
 | **XAI** | Grad-CAM (manual hooks), SHAP (GradientExplainer), LIME (lime_image) |
-| **AI Explanation** | Groq API — Llama 3.3 70B (free tier) |
 | **Frontend Hosting** | Vercel (free) |
-| **ML Backend Hosting** | HuggingFace Spaces ZeroGPU (free A100) |
+| **ML Backend Hosting** | HuggingFace Spaces CPU Basic (free) |
 | **Model Storage** | HuggingFace Model Hub |
 
 ---
@@ -144,7 +166,6 @@ All three techniques run server-side on ZeroGPU (free A100) and return images st
 ### Prerequisites
 - Node.js 18+
 - A Supabase project (free at [supabase.com](https://supabase.com))
-- Groq API key (free at [console.groq.com](https://console.groq.com))
 
 ### Steps
 
@@ -168,6 +189,16 @@ npm run dev
 # Opens at http://localhost:3000
 ```
 
+### Environment Variables
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+NEXT_PUBLIC_HF_SPACE_URL=https://kshitijt15-brain-tumor-xai.hf.space
+```
+
+---
+
 ## 🗄️ Database Schema
 
 Run `supabase_schema.sql` in Supabase → SQL Editor:
@@ -178,14 +209,13 @@ profiles   (id, email, name, role, created_at)
 scans      (id, patient_id, doctor_id, uploaded_by, patient_name,
             prediction, confidence, probabilities,
             gradcam_url, shap_url, lime_url,
-            status, error_message, doctor_notes,
-            ai_explanation, locked_at, created_at)
+            status, error_message, doctor_notes, created_at)
 
 -- Storage bucket
 xai-images  (public — PNG files at {scan_id}/{gradcam|shap|lime}.png)
 
 -- Row Level Security
-Doctors  → read / insert / update all scans
+Doctors  → read / insert / update their own scans (doctor_id = auth.uid())
 Patients → read only their own scans (patient_id = auth.uid())
 ```
 
@@ -207,18 +237,18 @@ brain-tumor-classification-xai/
 │   └── patient/
 │       ├── upload/page.tsx             ← Patient self-upload
 │       ├── scans/page.tsx              ← Scan history
-│       └── result/[id]/page.tsx        ← Result + XAI + AI explanation
-├── components/
-│   └── xai/
-│       ├── ResultCard.tsx              ← Prediction + probability bars
-│       └── ExplanationCard.tsx         ← AI plain-language summary
+│       └── result/[id]/page.tsx        ← Result + XAI + doctor notes
 ├── lib/
 │   ├── supabase.ts                     ← Supabase client + types
 │   ├── auth.ts                         ← signUp, signIn, getCurrentUser
 │   ├── scans.ts                        ← DB operations for scans table
-│   ├── storage.ts                      ← Upload XAI PNGs to Supabase Storage
-│   └── grok.ts                         ← Groq API for AI explanation
-├── public/
+│   └── storage.ts                      ← Upload XAI PNGs to Supabase Storage
+├── docs/
+│   ├── login.png
+│   ├── doctor-upload.png
+│   ├── doctor-result.png
+│   ├── case-detail.png
+│   └── architecture.svg
 ├── .env.local.example
 ├── next.config.ts
 └── package.json
@@ -236,34 +266,22 @@ vercel login
 vercel --prod
 ```
 
-Add the four environment variables in Vercel → Project → Settings → Environment Variables, then redeploy.
+Add the three environment variables in Vercel → Project → Settings → Environment Variables.
 
 ### ML Backend → HuggingFace Spaces
 
-The FastAPI backend with ZeroGPU runs on HuggingFace Spaces. To update `app.py`:
+The FastAPI backend runs on HuggingFace Spaces CPU Docker. To update `app.py`:
 
 ```bash
 git clone https://huggingface.co/spaces/kshitijt15/brain-tumor-xai
 # edit app.py
 git add . && git commit -m "update" && git push
-# Space auto-redeploys in ~2 minutes
+# Space auto-redeploys in ~3 minutes
 ```
 
 ### Model Weights → HuggingFace Hub
 
-The `best_resnet101.pth` (171 MB) is hosted on HuggingFace Model Hub and downloaded automatically at backend startup. To upload updated weights:
-
-```python
-from huggingface_hub import HfApi
-api = HfApi()
-api.upload_file(
-    path_or_fileobj="best_resnet101.pth",
-    path_in_repo="best_resnet101.pth",
-    repo_id="kshitijt15/resnet101-brain-tumor",
-    repo_type="model",
-    token="hf_..."
-)
-```
+The `best_resnet101.pth` (171 MB) is hosted on HuggingFace Model Hub and downloaded automatically at backend startup.
 
 ---
 
