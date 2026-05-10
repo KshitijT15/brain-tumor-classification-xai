@@ -57,31 +57,7 @@ This project classifies brain MRI scans into four categories — **Glioma**, **M
 
 ## 🏗️ Architecture
 
-![Architecture](docs/architecture.svg)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                         │
-│         Doctor Browser            Patient Browser           │
-│    Upload · Cases · XAI      My Scans · Result · XAI        │
-└──────────────────┬──────────────────────┬───────────────────┘
-                   │                      │
-┌──────────────────▼──────────────────────▼───────────────────┐
-│               FRONTEND — Vercel (Next.js 14)                │
-│   Auth (Supabase)  ·  Role Routing  ·  API Proxy Routes     │
-│   /doctor/*  (upload, cases, cases/[id])                    │
-│   /patient/* (upload, scans, result/[id])                   │
-└──────────────┬──────────────────────────┬───────────────────┘
-               │                          │
-┌──────────────▼──────────────┐  ┌────────▼───────────────────┐
-│  SUPABASE (Auth + Database) │  │  HF SPACES — CPU Docker    │
-│  - Auth with role metadata  │  │  FastAPI + ResNet101       │
-│  - profiles table (role)    │  │  /predict  → Grad-CAM      │
-│  - scans table (results +   │  │  /shap     → SHAP          │
-│    Storage URLs)            │  │  /lime     → LIME          │
-│  - xai-images Storage bucket│  │  /health   → keep-alive    │
-└─────────────────────────────┘  └────────────────────────────┘
-```
+![Architecture](docs/full_deployment_architecture.svg)
 
 ---
 
@@ -179,7 +155,7 @@ npm install
 
 # 3. Set up environment variables
 cp .env.local.example .env.local
-# Fill in the values (see below)
+# Fill in your Supabase URL, anon key, and HF Space URL
 
 # 4. Run Supabase schema
 # → Supabase dashboard → SQL Editor → paste and run supabase_schema.sql
@@ -187,14 +163,6 @@ cp .env.local.example .env.local
 # 5. Start dev server
 npm run dev
 # Opens at http://localhost:3000
-```
-
-### Environment Variables
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-NEXT_PUBLIC_HF_SPACE_URL=https://kshitijt15-brain-tumor-xai.hf.space
 ```
 
 ---
@@ -248,7 +216,7 @@ brain-tumor-classification-xai/
 │   ├── doctor-upload.png
 │   ├── doctor-result.png
 │   ├── case-detail.png
-│   └── architecture.svg
+│   └── full_deployment_architecture.svg
 ├── .env.local.example
 ├── next.config.ts
 └── package.json
@@ -266,7 +234,7 @@ vercel login
 vercel --prod
 ```
 
-Add the three environment variables in Vercel → Project → Settings → Environment Variables.
+Add environment variables in Vercel → Project → Settings → Environment Variables.
 
 ### ML Backend → HuggingFace Spaces
 
